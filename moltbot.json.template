@@ -7,5 +7,12 @@
   "gateway": {
     "port": 18789,
     "mode": "local"
+  },
+  {
+    hooks: {
+      enabled: true,
+      token: "shared-secret",
+      path: "/hooks",
+    },
   }
 }
