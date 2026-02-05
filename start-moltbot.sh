@@ -28,6 +28,20 @@ echo "Backup directory: $BACKUP_DIR"
 # Create config directory
 mkdir -p "$CONFIG_DIR"
 
+# ------------------------------------------------------------
+# R2 MOUNT SAFETY CHECK
+# ------------------------------------------------------------
+R2_AVAILABLE=false
+
+if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$BACKUP_DIR"; then
+  # Lightweight probe — do NOT ls or stat deeply
+    timeout 2s bash -c "echo test > $BACKUP_DIR/.r2_probe" 2>/dev/null && \
+    rm -f "$BACKUP_DIR/.r2_probe" 2>/dev/null && \
+    R2_AVAILABLE=true
+fi
+
+echo "R2 available: $R2_AVAILABLE"
+
 # ============================================================
 # RESTORE FROM R2 BACKUP
 # ============================================================
@@ -72,31 +86,37 @@ should_restore_from_r2() {
     fi
 }
 
-if [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
-    if should_restore_from_r2; then
-        echo "Restoring from R2 backup at $BACKUP_DIR/clawdbot..."
-        cp -a "$BACKUP_DIR/clawdbot/." "$CONFIG_DIR/"
-        # Copy the sync timestamp to local so we know what version we have
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
-        echo "Restored config from R2 backup"
-    fi
-elif [ -f "$BACKUP_DIR/clawdbot.json" ]; then
-    # Legacy backup format (flat structure)
-    if should_restore_from_r2; then
-        echo "Restoring from legacy R2 backup at $BACKUP_DIR..."
-        cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
-        echo "Restored config from legacy R2 backup"
-    fi
-elif [ -d "$BACKUP_DIR" ]; then
-    echo "R2 mounted at $BACKUP_DIR but no backup data found yet"
+set +e
+if [ "$R2_AVAILABLE" != "true" ]; then
+    echo "R2 not ready — skipping restore and starting fresh"
 else
-    echo "R2 not mounted, starting fresh"
+  if [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
+      if should_restore_from_r2; then
+          echo "Restoring from R2 backup at $BACKUP_DIR/clawdbot..."
+          cp -a "$BACKUP_DIR/clawdbot/." "$CONFIG_DIR/"
+          # Copy the sync timestamp to local so we know what version we have
+          cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
+          echo "Restored config from R2 backup"
+      fi
+  elif [ -f "$BACKUP_DIR/clawdbot.json" ]; then
+      # Legacy backup format (flat structure)
+      if should_restore_from_r2; then
+          echo "Restoring from legacy R2 backup at $BACKUP_DIR..."
+          cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
+          cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
+          echo "Restored config from legacy R2 backup"
+      fi
+  elif [ -d "$BACKUP_DIR" ]; then
+      echo "R2 mounted at $BACKUP_DIR but no backup data found yet"
+  else
+    echo "R2 unavailable at startup — gateway will start without restore"
+  fi
 fi
+set -e
 
 # Restore skills from R2 backup if available (only if R2 is newer)
 SKILLS_DIR="/root/clawd/skills"
-if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
+if [ "$R2_AVAILABLE" = "true" ] && [ -d "$BACKUP_DIR/skills" ]; then
     if should_restore_from_r2; then
         echo "Restoring skills from $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
